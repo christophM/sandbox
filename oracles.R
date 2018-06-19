@@ -73,7 +73,8 @@ pred.fun = function(X.model, newdata) X.model$predict(newdata)[,1]
 ALEPlot(bike.x, X.model = pred.bike, J = "temp2", pred.fun = pred.fun)
 
 
-
+plot(bike.x$temp, pred.bike$predict(bike.x)[,1])
+> 
 
 filter(ddat, temp2 == max(temp2)) %>% arrange(temp) %>% select(temp2, temp, weight, prediction) 
 
