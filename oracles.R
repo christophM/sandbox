@@ -74,9 +74,14 @@ ALEPlot(bike.x, X.model = pred.bike, J = "temp2", pred.fun = pred.fun)
 
 
 plot(bike.x$temp, pred.bike$predict(bike.x)[,1])
-> 
+p1 
 
 filter(ddat, temp2 == max(temp2)) %>% arrange(temp) %>% select(temp2, temp, weight, prediction) 
 
+
+ddat2.ice = ddat %>% 
+  filter(weight > 0.8) 
+
+ggplot(ddat2.ice) + geom_line(aes(group = .id.dist, x = temp2, y = prediction))
 
 
