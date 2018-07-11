@@ -52,12 +52,13 @@ res.pos = res[counterfact==TRUE, ]
 
 in.cf2 = rbindlist(in.cf)
 
-in.cf3 = in.cf2[, .(has.cf = any(.prediction)), by = list(id, feature)]
+in.cf3 = in.cf2[, .(has.cf = any(counterfact)), by = list(id, feature)]
 
 in.cf3[, sum(has.cf)/length(index), by = feature]
 
 res.df = data.frame(res)
-ggplot(in.cf2[in.cf2$feature == "temp",]) + geom_line(aes(x = value, y = .prediction, group = id))
+ggplot(in.cf2[in.cf2$feature == "temp",]) + geom_line(aes(x = as.numeric(as.character(value)), y = .prediction, group = id, color = counterfact)) +
+  geom_point(data = bike.x[index,], aes(x = temp, y = pred$predict(bike.x[index,])[,1]))
 
 
 
