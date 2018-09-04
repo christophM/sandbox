@@ -1,0 +1,122 @@
+# Model-agnostic inference
+Alternative titles: Black box inference, assumption-free inference
+
+
+## Motivation
+
+ML Performance >> Traditional statistics performance
+Missing: Inference
+Current state: Descriptive statistics (ALE, feature importance, ...)
+Some attempt for inference: PIMP, ...
+
+## Literature
+PIMP
+Two Cultures of Statistical Learning, Leo Breiman
+All methods (PDP, ALE, Feature importance, AME, )
+
+
+## Intuition / Theory
+
+ML model become hypothesis space, compared to only glm.
+Inference over ML model.
+
+
+## Tools
+
+
+**Replace:**
+betas -> ALE, AME
+standardized beta as importance -> Permutation feature importance?
+beta CIs -> ALE/AME + Bootstrap
+beta p-values -> ALE/AME + permutation tests
+R squared -> R squared
+ANOVA -> Sobol Shapley
+
+**Replacement TBD**
+- dose response 
+- treatment effect
+- How to handle non-iid
+
+
+**Recommend:**
+
+- Look at correlation to facilitate correct interpretations. Advice on how to compute things under strong correlation.
+- 
+
+
+
+```{r playground}
+load("~/repos/interpretable-ml-book/data/bike.RData")
+library(mlr)
+library(ggplot2)
+library(foreach)
+library("doParallel")
+# Creates a cluster with 2 cores
+cl = makePSOCKcluster(3)
+# Registers cluster
+registerDoParallel(cl)
+
+tsk = mlr::makeRegrTask(data = bike, target = "cnt")
+lrn = mlr::makeLearner("regr.ranger")
+mod = mlr::train(lrn, tsk)
+pred = iml::Predictor$new(mod, bike, y = "cnt")
+
+B = 1000
+
+
+retrain = function(dat, mlr.tsk, mlr.lrn, feature.name, b) {
+  require(mlr)
+  train.b.ind = sample(1:nrow(dat), size = nrow(dat), replace = TRUE)
+  test.b.ind = setdiff(1:nrow(dat), train.b.ind)
+  mod = mlr::train(mlr.lrn, mlr.tsk, subset = train.b.ind)
+  pred = iml::Predictor$new(mod, dat[test.b.ind,])
+  res = iml::Partial$new(pred, aggregation = "ale", feature = feature.name)
+  res$results$.bootstrap = b
+  res$results
+}
+
+ale.list = foreach(b = 1:B, .verbose = TRUE) %dopar% retrain(bike, tsk, lrn, "windspeed", b)
+
+
+res = data.table::rbindlist(ale.list)
+
+res.median = res[, .(.ale = median(.ale), windspeed = median(windspeed)), by = c(".id")]
+res.up95 = res[, .(.ale = quantile(.ale, probs = 0.95), windspeed = median(windspeed)), by = c(".id")]
+res.low95 = res[, .(.ale = quantile(.ale, probs = 0.05), windspeed = median(windspeed)), by = c(".id")]
+
+ggplot(res, aes(x = windspeed, y = .ale)) + geom_line(aes(group = .bootstrap), alpha = 0.1) + 
+  geom_line(data = res.median, color = 'red') + 
+  geom_line(data = res.up95, color = "red", linetype = 2) +
+  geom_line(data = res.low95, color = "red", linetype = 2)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+## Simulation
+
+Compare with lm: Does it always deliver the same results?
+Compare with more complex model, e.g. logistic regression, other GLM, GAM: Are results the same?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
