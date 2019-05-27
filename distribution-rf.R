@@ -1,8 +1,12 @@
 library("ggplot2")
 library("ranger")
-library("solitude")
+library("checkmate")
 # Simulate data
 # set.seed(42)
+
+# Other approaches
+# https://arxiv.org/pdf/1801.04211.pdf (but px has to be known ... )
+# Maybe combine my approach with the one above.
 
 generate = function(n) {
   x1 = rnorm(n, mean = 10, sd = 2)
@@ -13,7 +17,6 @@ generate = function(n) {
   data.frame(x1, x2, x3, x4)
 }
 
-n = 100
 shuffle = function(dat) {
   data.frame(lapply(dat, function(x) sample(x)))
 }
@@ -46,62 +49,53 @@ get_marginals = function(dat) {
 }
 
 
-
-dat = generate2(1000, y = FALSE)
-tdat = dat[1:1000,]
-
-
-# Test for one feature
-grid.size = 100
-x.interest = dat[rep(10, times = grid.size),]
-x.interest$x3 = seq(from = min(dat$x3), to = max(dat$x4), length.out = grid.size)
-
-marginals = get_marginals(dat)
-x3m = marginals$x3(x.interest$x3)
-
-p = predict(mod, data = x.interest)$prediction
-px = approxfun(x.interest$x3, x3m * p / (1 - p))
-
-px(x.interest$x3)
-
-plot(p)
-cbind(x.interest, p, x3m)
-
-plot(x.interest$x3, x3m)
-plot(x.interest$x3, p)
-plot(x.interest$x3, x3m * p/(1-p))
-
-
-
 ## Test whether this recovers correct distribution in multivariate normal distribution
 
 # simulate multivariate normal distribution with 3 features and some correlation
 library("MASS")
-n = 10000
+n = 1000
 mu = c(1,2,3)
 sigm = matrix(c(1, 0.7, 0, 0.7, 1, 0, 0, 0, 1), ncol = 3)
 dat = data.frame(mvrnorm(n = n, mu = mu, Sigma = sigm))
+
+# Add some noise
+noise = data.frame(matrix(rnorm(n = n * 100), ncol = 100))
+colnames(noise) = sprintf("noise%i", 1:100)
+dat = cbind(dat, noise)
 
 discrim_rf = function(dat){
   dat2 = shuffle(dat)
   dat$y = 1
   dat2$y = 0
   dat = rbind(dat, dat2)
-  ranger(y ~ ., data = dat)
+  ranger(y ~ ., data = dat, min.node.size = 100)
 }
 # train the random forest
 rf = discrim_rf(dat)
+pp = predict(rf, dat, predict.all = TRUE)
 
+
+predict_rf_feat = function(rf, xj.name, dat) {
+  # Get indices of trees that used xj
+  x.id = which(colnames(dat) == xj.name)
+  tree.ids = unlist(lapply(rf$forest$split.varIDs, function(x) x.id %in% x))
+  preds = predict(rf, dat, predict.all = TRUE)$predictions 
+  preds.subset = preds[, tree.ids]
+  rowMeans(preds.subset)
+}
+
+pred = predict_rf_feat(rf,  "X1", dat)
 
 get_p = function(rf, dat, feature, i, x.seq) {
   marginals = get_marginals(dat)
   x.interest = dat[rep(i, times = length(x.seq)), ]
   x.interest[[feature]] =  x.seq
-  predict(rf, data = x.interest)$prediction
+  #predict(rf, data = x.interest)$prediction
+  predict_rf_feat(rf, dat = x.interest, xj.name = feature)
 }
 
 get_px = function(rf, dat, feature, i) {
-  grid.size = 1000
+  grid.size = 100
   marginals = get_marginals(dat)
   x.interest = dat[rep(i, times = grid.size), ]
   x.interest[[feature]] = seq(from = min(dat[[feature]]),
@@ -146,7 +140,42 @@ plot.df = data.frame(
 	   get_p(rf, dat, j, i, x.seq))
 )
 
-p = ggplot(plot.df) + geom_line(aes(x = x, y = dens, group = type, color = type))
+library('dplyr')
+plot.df = plot.df %>% group_by(type) %>%
+	mutate(dens = dens / sum(dens)) %>%
+	ungroup() %>%
+	data.frame()
+
+
+kl = function(p.vec, q.vec) {
+  assert_numeric(p.vec, len = length(q.vec))
+  assert_numeric(q.vec, len = length(p.vec))
+  p.vec = p.vec / sum(p.vec)
+  q.vec = q.vec / sum(q.vec)
+  - sum(p.vec * log(q.vec / p.vec))
+}
+
+kl.proposed = kl(plot.df[plot.df$type == "true.cond", "dens"],
+		 plot.df[plot.df$type == "px.rf", "dens"])
+kl.baseline = kl(plot.df[plot.df$type == "true.cond", "dens"],
+		 plot.df[plot.df$type == "marginal", "dens"])
+
+p = ggplot(plot.df) + geom_line(aes(x = x, y = dens, group = type, color = type)) + 
+	ggtitle(sprintf("KL BL: %.3f, KL RF: %.3f", kl.baseline, kl.proposed))
 print(p)
+
+
+
+## Alternative: Predict xj from rest
+
+dd2 = dat
+dd2$y = NULL
+rf2 = ranger(X1 ~ ., data = dd2)
+feature = "X1"
+x.interest = dat[rep(i, times = length(x.seq)), ]
+x.interest[[feature]] =  x.seq
+print(predict(rf2, data = x.interest)$prediction)
+
+
 ## Use this stuff for ICE
 ## Use this stuff for feature importance
