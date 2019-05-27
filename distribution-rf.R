@@ -2,7 +2,7 @@ library("ggplot2")
 library("ranger")
 library("solitude")
 # Simulate data
-set.seed(42)
+# set.seed(42)
 
 generate = function(n) {
   x1 = rnorm(n, mean = 10, sd = 2)
@@ -18,21 +18,6 @@ shuffle = function(dat) {
   data.frame(lapply(dat, function(x) sample(x)))
 }
 
-shuffle2 = function(dat){
-  data.frame(lapply(dat, function(x) {
-  if (inherits(x, "factor")){
-    lvls = unique(x)
-    factor(sample(lvls, replace = TRUE, size = length(x)), levels = levels(x))
-    #sample(x)
-  } else {
-    minx = min(x)
-    maxx = max(x)
-    runif(length(x), min = minx, max = maxx)
-    #sample(x)
-  }
-  }))
-}
-
 generate2 = function(n, y = TRUE){
   dat = generate(n)
   dat2 = shuffle(dat)
@@ -41,48 +26,12 @@ generate2 = function(n, y = TRUE){
   tdat
 }
 
-# Train RF
-train.dat = generate2(300)
-library("ranger")
-mod = ranger(y ~ ., data = train.dat)
-
-
-# Check performance
-test.dat = generate2(1000)
-preds = predict(mod, data = test.dat)
-test.dat$pred = preds$predictions
-
-	facet_grid(y ~ x2)
-
-
-
-# Try out isolation forest
-
-# TODO: Continue here
-
-dat = generate2(1000, y = FALSE)
-
-tdat = dat[1:1000,]
-sol = isolation_forest(tdat, num.tree = 1000)
-
-dat$pred = predict(sol, data = dat)
-dat$y = rep(c(1,0), each = 1000)
-ggplot(dat)  + geom_boxplot(aes(x = y, y = pred, group = y))
-
-
-
-
 # Calculate P_X from random forest probability p = P_X / (P_X + P_{X,marginal})
 # Therefore P_X = p/(1-p) * P_{X,marginal}
 
 # marginal distribution is product of all marginal feature distributions
 # kernel density for each feature
-
-
-# use ecdf, because it is more stable
-
-
-get_marginal = function(dat) {
+get_marginals = function(dat) {
   # Density estimator for each feature
   density_funs = lapply(dat, function(x) {
     if (inherits(x, "factor")) {
@@ -92,24 +41,8 @@ get_marginal = function(dat) {
       approxfun(density(x))
     }
   })
-  function(dats) {
-    p = rep(1, times = nrow(dats))
-    for (j in 1:ncol(dats)){
-      p = p * density_funs[[j]](dats[[j]])
-    }
-    as.vector(p)
-}
-}
-get_marginal_ecdf = function(dat) {
-  # Density estimator for each feature
-  density_funs = lapply(dat, ecdf)
-  function(dats) {
-    p = rep(1, times = nrow(dats))
-    for (j in 1:ncol(dats)){
-      p = p * density_funs[[j]](dats[[j]])
-    }
-    as.vector(p)
-}
+  names(density_funs) = names(dat)
+  density_funs
 }
 
 
@@ -117,46 +50,19 @@ get_marginal_ecdf = function(dat) {
 dat = generate2(1000, y = FALSE)
 tdat = dat[1:1000,]
 
-marginal =  get_marginal(tdat)
-marginal_ecdf = get_marginal_ecdf(tdat)
-ecdf.marginal = marginal_ecdf(tdat)
-p.marginal = marginal(dat)
-
-p = predict(mod, data = dat)$prediction
-
-px = p.marginal * p / (1 - p)
-p_ecdf =  ecdf.marginal * p / (1 - p)
-
-summary(px)
-
-dat$px = px
-
-
-ggplot(test.dat) + geom_point(aes(x = x1, y = x3, color = log(px))) + 
-	facet_grid(y ~ x2)
-
-
 
 # Test for one feature
 grid.size = 100
-x.interest = dat[rep(1, times = grid.size),]
+x.interest = dat[rep(10, times = grid.size),]
 x.interest$x3 = seq(from = min(dat$x3), to = max(dat$x4), length.out = grid.size)
 
-x3_marginal = approxfun(density(tdat$x3))
+marginals = get_marginals(dat)
+x3m = marginals$x3(x.interest$x3)
 
 p = predict(mod, data = x.interest)$prediction
-x3m = x3_marginal(x.interest$x3)
+px = approxfun(x.interest$x3, x3m * p / (1 - p))
 
-x3m_scaled = x3m/sum(x3m)
-
-x3m * p / (1-p)
-
-x3m_scaled * p / (1 - p)
-
-
-x3m_scaled * p / (1 - p)
-p
-
+px(x.interest$x3)
 
 plot(p)
 cbind(x.interest, p, x3m)
@@ -166,3 +72,81 @@ plot(x.interest$x3, p)
 plot(x.interest$x3, x3m * p/(1-p))
 
 
+
+## Test whether this recovers correct distribution in multivariate normal distribution
+
+# simulate multivariate normal distribution with 3 features and some correlation
+library("MASS")
+n = 10000
+mu = c(1,2,3)
+sigm = matrix(c(1, 0.7, 0, 0.7, 1, 0, 0, 0, 1), ncol = 3)
+dat = data.frame(mvrnorm(n = n, mu = mu, Sigma = sigm))
+
+discrim_rf = function(dat){
+  dat2 = shuffle(dat)
+  dat$y = 1
+  dat2$y = 0
+  dat = rbind(dat, dat2)
+  ranger(y ~ ., data = dat)
+}
+# train the random forest
+rf = discrim_rf(dat)
+
+
+get_p = function(rf, dat, feature, i, x.seq) {
+  marginals = get_marginals(dat)
+  x.interest = dat[rep(i, times = length(x.seq)), ]
+  x.interest[[feature]] =  x.seq
+  predict(rf, data = x.interest)$prediction
+}
+
+get_px = function(rf, dat, feature, i) {
+  grid.size = 1000
+  marginals = get_marginals(dat)
+  x.interest = dat[rep(i, times = grid.size), ]
+  x.interest[[feature]] = seq(from = min(dat[[feature]]),
+			      to = max(dat[[feature]]),
+			      length.out = grid.size)
+  p = predict(rf, data = x.interest)$prediction
+  marginal_grid =  marginals[[feature]](x.interest[[feature]])
+  approxfun(x.interest[[feature]], marginal_grid * p / (1 - p))
+}
+
+
+
+
+i = 32
+j = "X1" 
+dat[i, ]
+px = get_px(rf, dat, j, i)
+marginals = get_marginals(dat)
+
+
+# compute conditional distribution for x.interest
+x.interest = dat[i, ]
+marginals = get_marginals(dat)
+x.seq = seq(from = min(dat[[j]]), to = max(dat[[j]]), length.out = 100)
+
+plot(x.seq, px(x.seq))
+plot(x.seq, marginals[[j]](x.seq))
+# compare with true conditional distribution
+library(condMVNorm)
+params = condMVN(mean = mu, sigma = sigm, dependent.ind = 1,
+	given.ind = c(2,3), X.given = unlist(dat[i, c(2,3), drop = TRUE]))
+params
+plot(x.seq, dnorm(x.seq, mean = params$condMean, sd = params$condVar))
+abline(v = params$condMean)
+
+plot.df = data.frame(
+  x = rep(x.seq, times = 4),
+  type = rep(c("px.rf", "marginal", "true.cond", "p.rf"), each = length(x.seq)),
+  dens = c(px(x.seq),
+	   marginals[[j]](x.seq),
+	   dnorm(x.seq, mean = params$condMean, sd = params$condVar),
+	   get_p(rf, dat, j, i, x.seq))
+)
+
+p = ggplot(plot.df) + geom_line(aes(x = x, y = dens, group = type, color = type))
+print(p)
+## Use this stuff for ICE
+## Use this stuff for feature importance
