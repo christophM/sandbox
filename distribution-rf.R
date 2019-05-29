@@ -53,14 +53,15 @@ get_marginals = function(dat) {
 
 # simulate multivariate normal distribution with 3 features and some correlation
 library("MASS")
-n = 1000
+n = 10000
 mu = c(1,2,3)
-sigm = matrix(c(1, 0.7, 0, 0.7, 1, 0, 0, 0, 1), ncol = 3)
+sigm = matrix(c(1, 0.8, 0, 0.8, 1, 0, 0, 0, 1), ncol = 3)
 dat = data.frame(mvrnorm(n = n, mu = mu, Sigma = sigm))
 
 # Add some noise
-noise = data.frame(matrix(rnorm(n = n * 100), ncol = 100))
-colnames(noise) = sprintf("noise%i", 1:100)
+p_noise = 50
+noise = data.frame(matrix(rnorm(n = n * p_noise), ncol = p_noise))
+colnames(noise) = sprintf("noise%i", 1:p_noise)
 dat = cbind(dat, noise)
 
 discrim_rf = function(dat){
@@ -68,7 +69,7 @@ discrim_rf = function(dat){
   dat$y = 1
   dat2$y = 0
   dat = rbind(dat, dat2)
-  ranger(y ~ ., data = dat, min.node.size = 100)
+  ranger(y ~ ., data = dat, min.node.size = 200, num.trees = 30)
 }
 # train the random forest
 rf = discrim_rf(dat)
@@ -84,14 +85,13 @@ predict_rf_feat = function(rf, xj.name, dat) {
   rowMeans(preds.subset)
 }
 
-pred = predict_rf_feat(rf,  "X1", dat)
 
 get_p = function(rf, dat, feature, i, x.seq) {
   marginals = get_marginals(dat)
   x.interest = dat[rep(i, times = length(x.seq)), ]
   x.interest[[feature]] =  x.seq
-  #predict(rf, data = x.interest)$prediction
-  predict_rf_feat(rf, dat = x.interest, xj.name = feature)
+  predict(rf, data = x.interest)$prediction
+  #predict_rf_feat(rf, dat = x.interest, xj.name = feature)
 }
 
 get_px = function(rf, dat, feature, i) {
@@ -102,6 +102,7 @@ get_px = function(rf, dat, feature, i) {
 			      to = max(dat[[feature]]),
 			      length.out = grid.size)
   p = predict(rf, data = x.interest)$prediction
+  #p = predict_rf_feat(rf, dat = x.interest, xj.name = feature)
   marginal_grid =  marginals[[feature]](x.interest[[feature]])
   approxfun(x.interest[[feature]], marginal_grid * p / (1 - p))
 }
@@ -162,20 +163,56 @@ kl.baseline = kl(plot.df[plot.df$type == "true.cond", "dens"],
 
 p = ggplot(plot.df) + geom_line(aes(x = x, y = dens, group = type, color = type)) + 
 	ggtitle(sprintf("KL BL: %.3f, KL RF: %.3f", kl.baseline, kl.proposed))
+
 print(p)
+# =============================================================================
+# Alternative: Predict xj from rest
+# =============================================================================
+
+# Loop over features
+# For each feature, predict with tree
+# save trees in a list
+library("partykit")
 
 
+library(partykit)
+# Computes for each feature xj:
+# - A model that predicts xj from the other feature X_C
+# - From that model a way to draw from the conditional dist of xj
+# - From that model a way to get the conditional density of xj
+mods = lapply(colnames(dat), function(feat) {
+  fa = as.formula(sprintf("%s ~ .", feat))
+  model = ctree(fa, data = dat)
+  quants = seq(from = 0, to = 1, length.out = 101)
+  # Sample from conditional distribution
+  rcondi = function(X) {
+    # TODO:  Allow drawing of multiple times per row
+    # compute inverse cumulative conditional distribution of xj given X_C
+    qq = predict(model, newdata = X, type = "quantile", at = quants)
+    pfuns = apply(qq, 1, function(obs) approxfun(x = quants, y = obs))
+    # draw from runif
+    unlist(lapply(pfuns, function(x) x(runif(1))))
+  }
+  dens = function(X) {
+    predict(model, newdata = X, type = "density")
+  }
+  list(
+    model = model,
+    dens = dens,
+    rcondi = rcondi)
+  }
+)
 
-## Alternative: Predict xj from rest
+feature_index = which(colnames(dat)  == j)
+x_range = seq(from = -3, to = 3, length.out = 100)
+dd = mods[[feature_index]]$dens(dat[i,])[[1]](x_range)
 
-dd2 = dat
-dd2$y = NULL
-rf2 = ranger(X1 ~ ., data = dd2)
-feature = "X1"
-x.interest = dat[rep(i, times = length(x.seq)), ]
-x.interest[[feature]] =  x.seq
-print(predict(rf2, data = x.interest)$prediction)
+dfr = data.frame(x = x_range, y = dd/sum(dd))
+p2 = p + geom_line(aes(x = x, y = y), data = dfr)
+print(p2)
 
+
+## TODO: Draw according to quantile distribution
 
 ## Use this stuff for ICE
 ## Use this stuff for feature importance
