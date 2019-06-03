@@ -53,7 +53,7 @@ get_marginals = function(dat) {
 
 # simulate multivariate normal distribution with 3 features and some correlation
 library("MASS")
-n = 10000
+n = 1000
 mu = c(1,2,3)
 sigm = matrix(c(1, 0.8, 0, 0.8, 1, 0, 0, 0, 1), ncol = 3)
 dat = data.frame(mvrnorm(n = n, mu = mu, Sigma = sigm))
@@ -204,9 +204,9 @@ mods = lapply(colnames(dat), function(feat) {
 )
 
 feature_index = which(colnames(dat)  == j)
-x_range = seq(from = -3, to = 3, length.out = 100)
-dd = mods[[feature_index]]$dens(dat[i,])[[1]](x_range)
+x_range = seq(from = -4, to = 4, length.out = 100)
 
+dd = mods[[feature_index]]$dens(dat[i,])[[1]](x_range)
 dfr = data.frame(x = x_range, y = dd/sum(dd))
 p2 = p + geom_line(aes(x = x, y = y), data = dfr)
 print(p2)
@@ -215,4 +215,51 @@ print(p2)
 ## TODO: Draw according to quantile distribution
 
 ## Use this stuff for ICE
+
+f = function(X) {
+  X$X1 + rnorm(nrow(X))
+}
+
+
+tdat = dat
+tdat$y = f(dat)
+
+library('mlr')
+lrn = makeLearner("regr.ranger")
+tsk = makeRegrTask(data = tdat, target = "y")
+
+smod = train(lrn, tsk)
+library(iml)
+pred = Predictor$new(smod, tdat)
+
+fe = FeatureEffect$new(pred, feature = "X1", method = "ice")
+
+grit =  seq(from = -4, to = 4, length.out = 20)
+grit.expand = rep(grit,times = nrow(dat))
+dat2 = dat[rep(1:nrow(dat), each = length(grit)), ]
+dat2$X1.orig = rep(dat$X1, each = length(grit))
+dat2$X2.group = cut(dat2$X2, breaks = c(-10,  0, 1, 2, 3, 10))
+dat2$X1 = grit.expand
+dat2$pred = pred$predict(dat2)$.prediction
+
+probs = lapply(1:nrow(dat), function(i) {
+  mods[[1]]$dens(dat[i,])[[1]](grit)
+})
+dat2$probs = unlist(probs)
+dat2$group = rep(1:nrow(dat), each = length(grit))
+ggplot(dat2) +
+  geom_line(aes(x = X1, y = pred, color = probs, group = group)) +  facet_wrap("X2.group")
+
+head(fe$results)
+
 ## Use this stuff for feature importance
+fimp = FeatureImp$new(pred, loss = "mae")
+
+plot(fimp)
+
+
+# Implement feature importance with permuted feature
+
+
+
+
