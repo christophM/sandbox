@@ -212,7 +212,6 @@ p2 = p + geom_line(aes(x = x, y = y), data = dfr)
 print(p2)
 
 
-## TODO: Draw according to quantile distribution
 
 ## Use this stuff for ICE
 
@@ -225,7 +224,7 @@ tdat = dat
 tdat$y = f(dat)
 
 library('mlr')
-lrn = makeLearner("regr.ranger")
+lrn = makeLearner("regr.ksvm")
 tsk = makeRegrTask(data = tdat, target = "y")
 
 smod = train(lrn, tsk)
@@ -248,18 +247,37 @@ probs = lapply(1:nrow(dat), function(i) {
 dat2$probs = unlist(probs)
 dat2$group = rep(1:nrow(dat), each = length(grit))
 ggplot(dat2) +
-  geom_line(aes(x = X1, y = pred, color = probs, group = group)) +  facet_wrap("X2.group")
+  geom_line(aes(x = X1, y = pred, color = probs, group = group)) +
+  facet_wrap("X2.group")
 
 head(fe$results)
 
 ## Use this stuff for feature importance
-fimp = FeatureImp$new(pred, loss = "mae")
+fimp = FeatureImp$new(pred, loss = "mae", compare = "difference")
 
 plot(fimp)
 
-
 # Implement feature importance with permuted feature
 
+cond_featureimp = function(pred, mods, feature) {
+  y = pred$data$y[[1]]
+  X = pred$data$X
+  # compute loss
+  loss.mae = Metrics::mae(y,pred$predict(X)[[1]])
+
+  # sample from conditionals
+  X[[feature]] = mods[[feature]]$rcondi(X)
+  # compute loss again
+  loss.mae2 = Metrics::mae(y,pred$predict(X)[[1]])
+  loss.mae2 - loss.mae
+}
+fimps = lapply(1:ncol(dat), function(i) {
+  cond_featureimp(pred, mods, i)
+})
+
+fimps = unlist(fimps)
+dt = data.frame(feature = factor(colnames(dat), levels = colnames(dat)[order(fimps)]), imp = fimps)
+p = ggplot(dt) + geom_point(aes(x = imp, y = feature))
 
 
-
+gridExtra:::grid.arrange(p, fimp$plot(), nrow = 1)
