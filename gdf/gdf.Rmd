@@ -1,0 +1,63 @@
+# Generalized Degrees of Freedom
+
+
+```{r}
+
+library("mlr")
+set.seed(42)
+dat = cars
+dat$speed = NULL
+dat$x2 = rnorm(nrow(dat))
+dat$x3 = rnorm(nrow(dat))
+dat$x4 = rnorm(nrow(dat))
+dat$x5 = rnorm(nrow(dat))
+dat$x6 = rnorm(nrow(dat))
+dat$x7 = rnorm(nrow(dat))
+dat$x8 = rnorm(nrow(dat))
+tsk = makeRegrTask(data = dat, target = "dist")
+lrn = makeLearner("regr.lm")
+lrn2 = makeLearner("regr.rpart")
+lrn3 = makeLearner("regr.ranger")
+lrn4 = makeLearner("regr.xgboost")
+gcv = function(lrn, tsk, tau.fac = 0.6, n_perturbations = 100){
+  n = getTaskSize(tsk)
+  deltas.m = matrix(NA, nrow = n_perturbations, ncol = n)
+  y.m = matrix(NA, nrow = n_perturbations, ncol = n)
+  for(tt in 1:n_perturbations) {
+  mod = train(lrn, tsk)
+  y.hat = getPredictionResponse(predict(mod, tsk))
+
+  # generate new y  
+  y = getTaskTargets(tsk)
+  tau = tau.fac * sd(y)
+  deltas = rnorm(n, mean = 0) * tau
+  y2 = y + deltas
+  # refit the model
+  dat2 = dat
+  target = getTaskTargetNames(tsk)
+  dat2[target] = y2
+  tsk2 = makeRegrTask(data = dat2, target = target)
+  mod2 = train(lrn, tsk2)
+
+  y.hat2 = getPredictionResponse(predict(mod2, tsk))
+  y.m[tt,] = y.hat2
+  deltas.m[tt,] = deltas
+  }
+  ones = matrix(1, nrow = n_perturbations, ncol = 1)
+  hs = lapply(1:n, function(i){
+    mm = .lm.fit(x = cbind(ones, deltas.m[,i,drop=FALSE]), y = y.m[,i,drop=FALSE])
+    mm$coefficients[2]
+  })
+  sum(unlist(hs))
+}
+
+gcv(lrn,tsk, tau.fac = 300)
+gcv(lrn2,tsk, tau.fac = 100)
+gcv(lrn3,tsk, tau.fac = 0.01)
+
+gcv(lrn4, tsk, n_perturbations = 300)
+
+
+
+
+```
