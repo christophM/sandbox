@@ -90,12 +90,20 @@ summary(pred_train)
 library(detpack)
 forest = read.csv("~/Downloads/covtype.data")
 
-dtf = as.matrix(X)
-dtf = as.matrix(forest)
+size = 1000
+
+forest2 = forest[sample(1:nrow(forest), size = size), ]
+
+#dtf = as.matrix(X)
+dtf = as.matrix(forest2)
 
 dtf = t(dtf)
 
-dtree  = det.construct(dtf, dtalim = 100, cores = 8)
+a = 0.0000000000001
+
+dtree  = det.construct(dtf, dtalim = 100, alphag = a,
+		       alphad = 0.00000001,
+		       cores = 2)
 summary(dtree)
 
 qq = det.query(dtree, dtf[, , drop = FALSE])

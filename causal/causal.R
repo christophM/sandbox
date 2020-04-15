@@ -1,45 +1,71 @@
-# Simulation for causal ML
-library("iml")
-library("mlr")
-library("rpart")
-library("dplyr")
-library("ggplot2") 
-set.seed(42)
-n = 1000
+library(iml)
+library(mlr)
+library(ggplot2)
 
-fx = function(n) rnorm(n)
-fm = function(n, x) rnorm(n, mean = x)
-fy = function(n, x, m) rnorm(n, mean = 0.1 * x + 0.9 * m)
-fz = function(n, y) rnorm(n, mean = -y, sd = 2)
-x =  fx(n)
-m = fm(n, x)
-y = fy(n, x, m)
-z = fz(n, y)
+# =============================================================================
+# Situation: x is mediator for other feature
+# =============================================================================
+n = 100
 
-dat = data.frame(x, m, z, y)
-
+x1 = rnorm(n)
+x = rnorm(n, mean = x1)
+y = sin(x) + x1 + rnorm(n, sd = 0.1)
+dat = data.frame(x, x1, y)
 tsk = makeRegrTask(data = dat, target = "y")
-lrn = makeLearner("regr.lm")
-
-
+lrn = makeLearner("regr.gamboost")
 mod = train(lrn, tsk)
 pred = Predictor$new(mod, data = dat)
-fes = FeatureEffects$new(pred, method = "pdp")
-plot(fes, ncol = 1)
+
+eff = FeatureEffect$new(pred, "x")
+true.effect = data.frame(x = seq(from = -3, to = 3, length.out = n))
+true.effect$y = sin(true.effect$x)
+plot(eff) + geom_line(aes(x = x, y = y), data = true.effect, lty = 2)
+
+# =============================================================================
+# Situation: Effect of x is mediated by other feature
+# =============================================================================
+
+n = 100
+
+x = rnorm(n)
+x1 = rnorm(n, mean = x)
+y = 0.1 * x + sin(x1) + rnorm(n, sd = 0.1)
+dat = data.frame(x, x1, y)
+tsk = makeRegrTask(data = dat, target = "y")
+lrn = makeLearner("regr.gamboost")
+mod = train(lrn, tsk)
+pred = Predictor$new(mod, data = dat)
+
+eff = FeatureEffect$new(pred, "x")
+direct.effect = data.frame(x = seq(from = -3, to = 3, length.out = n))
+direct.effect$y = 0.1 * direct.effect$x
+plot(eff) + geom_line(aes(x = x, y = y), data = direct.effect, lty = 2)
 
 
-library("ranger")
-fm.h = ranger(m ~ x, data = dat)
-fy.h = ranger(y ~ x + m, data = dat)
-fz.h = ranger(z ~ y, data = dat)
+# =============================================================================
+# Situation: Effect of x is mediated by other feature; no direct effect 
+# =============================================================================
 
-x.pdp = seq(from = min(x), to = max(x), length.out = 20)
-dat.new = cbind(x = rep(x.pdp, times = nrow(dat)), dat[c("m", "y", "z")])
+n = 1000
 
-dat.new$m = predict(fm.h, data = dat.new)$predictions
-dat.new$y  = predict(fy.h, data = dat.new)$predictions
-dat.new$z = predict(fz.h, data = dat.new)$predictions
-dat.new.aggregated = dat.new  %>% group_by(x) %>% summarize(y = mean(y))
-ggplot(dat.new.aggregated) + geom_line(aes(x = x, y = y))
-# Discover causal graphs in wine data
-library("pcalg")
+x = rnorm(n)
+x1 = rnorm(n, mean = x)
+y = sin(x1) + rnorm(n, sd = 0.1)
+dat = data.frame(x, x1, y)
+tsk = makeRegrTask(data = dat, target = "y")
+lrn = makeLearner("regr.rpart")
+mod = train(lrn, tsk)
+pred = Predictor$new(mod, data = dat)
+
+eff = FeatureEffect$new(pred, "x")
+direct.effect = data.frame(x = seq(from = -3, to = 3, length.out = n))
+direct.effect$y = 0
+plot(eff) + geom_line(aes(x = x, y = y), data = direct.effect, lty = 2)
+
+# => PDP estimates the direct effect correctly
+# => PDP does not estimate the total effect
+
+
+
+
+
